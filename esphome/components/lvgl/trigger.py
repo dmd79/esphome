@@ -79,13 +79,24 @@ async def generate_triggers():
                 )
 
             for conf in w.config.get(CONF_ON_VALUE, ()):
-                await add_trigger(
+                from .widgets.slider import slider_spec
+
+                event_lambda = await add_trigger(
                     conf,
                     w,
                     LV_EVENT.VALUE_CHANGED,
                     API_EVENT,
                     UPDATE_EVENT,
                 )
+                # For sliders, also register on LV_EVENT_PRESSING to get real-time
+                # updates while dragging. In LVGL 9.x, LV_EVENT_VALUE_CHANGED is
+                # only sent once on release for sliders, unlike arc which fires
+                # continuously during drag. Reuse the same lambda to avoid
+                # duplicating the trigger actions.
+                if w.type is slider_spec:
+                    lv_add(
+                        lvgl_static.add_event_cb(w.obj, event_lambda, LV_EVENT.PRESSING)
+                    )
 
             await add_on_boot_triggers(w.config.get(CONF_ON_BOOT, ()))
 
@@ -108,4 +119,6 @@ async def add_trigger(conf, w, *events, is_selected=None):
     async with LambdaContext(EVENT_ARG, where=tid) as context:
         with LvConditional(is_selected):
             lv_add(trigger.trigger(*value, literal("event")))
-    lv_add(lvgl_static.add_event_cb(w.obj, await context.get_lambda(), *events))
+    event_lambda = await context.get_lambda()
+    lv_add(lvgl_static.add_event_cb(w.obj, event_lambda, *events))
+    return event_lambda
